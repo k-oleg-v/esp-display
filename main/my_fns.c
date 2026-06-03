@@ -89,13 +89,22 @@ void gpio_init() {
 	
 	ret = iot_button_new_gpio_device(&down_btn.cfg, &down_btn.gpio_cfg, &down_btn.gpio_hdl);
 	if(NULL == down_btn.gpio_hdl || ret != ESP_OK) {
-		ESP_LOGE(tag, "Low button create failed");
+		ESP_LOGE(tag, "Down button create failed");
 	}
 
 	
 	ret = iot_button_new_gpio_device(&up_btn.cfg, &up_btn.gpio_cfg, &up_btn.gpio_hdl);
 	if(NULL == up_btn.gpio_hdl || ret != ESP_OK) {
-		ESP_LOGE(tag, "Top button create failed");
+		ESP_LOGE(tag, "Up button create failed");
+	}
+
+	ret = iot_button_new_gpio_device(&left_btn.cfg, &left_btn.gpio_cfg, &left_btn.gpio_hdl);
+	if(NULL == left_btn.gpio_hdl || ret != ESP_OK) {
+		ESP_LOGE(tag, "Left button create failed");
+	}
+	ret = iot_button_new_gpio_device(&right_btn.cfg, &right_btn.gpio_cfg, &right_btn.gpio_hdl);
+	if(NULL == right_btn.gpio_hdl || ret != ESP_OK) {
+		ESP_LOGE(tag, "right button create failed");
 	}
 
 	
@@ -110,13 +119,27 @@ void gpio_init() {
     io_conf.intr_type = GPIO_INTR_DISABLE;      // Отключить прерывания
     io_conf.mode = GPIO_MODE_INPUT;            // Режим входа
     io_conf.pin_bit_mask = (1ULL << BTN_PIN_CENTER); // Выбор пина
-    io_conf.pull_down_en = 0;                   // Отключить pull-down
+    io_conf.pull_down_en = 1;                   // Отключить pull-down
     io_conf.pull_up_en = 0;                     // Включить pull-up
     gpio_config(&io_conf);
 
     io_conf.intr_type = GPIO_INTR_DISABLE;      // Отключить прерывания
     io_conf.mode = GPIO_MODE_INPUT;            // Режим входа
     io_conf.pin_bit_mask = (1ULL << BTN_PIN_DOWN); // Выбор пина
+    io_conf.pull_down_en = 1;                   // Отключить pull-down
+    io_conf.pull_up_en = 0;                     // Включить pull-up
+    gpio_config(&io_conf);
+
+	io_conf.intr_type = GPIO_INTR_DISABLE;      // Отключить прерывания
+    io_conf.mode = GPIO_MODE_INPUT;            // Режим входа
+    io_conf.pin_bit_mask = (1ULL << BTN_PIN_LEFT); // Выбор пина
+    io_conf.pull_down_en = 1;                   // Отключить pull-down
+    io_conf.pull_up_en = 0;                     // Включить pull-up
+    gpio_config(&io_conf);
+
+	io_conf.intr_type = GPIO_INTR_DISABLE;      // Отключить прерывания
+    io_conf.mode = GPIO_MODE_INPUT;            // Режим входа
+    io_conf.pin_bit_mask = (1ULL << BTN_PIN_RIGHT); // Выбор пина
     io_conf.pull_down_en = 1;                   // Отключить pull-down
     io_conf.pull_up_en = 0;                     // Включить pull-up
     gpio_config(&io_conf);
@@ -136,6 +159,14 @@ void cb_reg() {
 	if(ret != ESP_OK){
 		ESP_LOGE(tag, "upClk failed");
 	}
+	ret = iot_button_register_cb(left_btn.gpio_hdl, BUTTON_PRESS_UP, NULL, leftClk, NULL);
+	if(ret != ESP_OK){
+		ESP_LOGE(tag, "leftClk failed");
+	}
+	ret = iot_button_register_cb(right_btn.gpio_hdl, BUTTON_PRESS_UP, NULL, rightClk, NULL);
+	if(ret != ESP_OK){
+		ESP_LOGE(tag, "rightClk failed");
+	}
 	ESP_LOGI(tag, "btn cfg ok");
 	xTaskCreate(menuTask, "menu", 2048, NULL, 5, NULL);
 }
@@ -147,12 +178,21 @@ void process_button_events() {
 	}
 		event = iot_button_get_event(down_btn.gpio_hdl);
 	if (event != BUTTON_NONE_PRESS) {
-		ESP_LOGI(tag, "low event is %s", iot_button_get_event_str(event));
+		ESP_LOGI(tag, "down event is %s", iot_button_get_event_str(event));
 	}
 		event = iot_button_get_event(up_btn.gpio_hdl);
 	if (event != BUTTON_NONE_PRESS) {
-		ESP_LOGI(tag, "top event is %s", iot_button_get_event_str(event));
+		ESP_LOGI(tag, "up event is %s", iot_button_get_event_str(event));
 	}
+		event = iot_button_get_event(left_btn.gpio_hdl);
+	if (event != BUTTON_NONE_PRESS) {
+		ESP_LOGI(tag, "left event is %s", iot_button_get_event_str(event));
+	}
+		event = iot_button_get_event(right_btn.gpio_hdl);
+	if (event != BUTTON_NONE_PRESS) {
+		ESP_LOGI(tag, "right event is %s", iot_button_get_event_str(event));
+	}
+	
 		
 }
 
@@ -268,7 +308,7 @@ void appCtxInit() {
 		}
 	}
 
-	calcElements[0][0] = (struct appElement_t) { "     ", digitEnter, 0, 0};
+	calcElements[0][0] = (struct appElement_t) { "", digitEnter, 0, 0};
 	calcElements[1][3] = (struct appElement_t) {"0", digitEnter, 3, 1};
 	calcElements[2][3] = (struct appElement_t) {".", digitEnter, 3, 2};
 	calcElements[3][3] = (struct appElement_t) {"=", digitEnter, 3, 3};
@@ -354,7 +394,7 @@ void calcTask() {
 	appPrinter(&calculator, calculator.xCursor, calculator.yCursor);
 	while (1) {
 		if (appId == CALC_ID) {
-			cursorMover();
+			if (cursorMover()) appPrinter(&calculator, calculator.xCursor, calculator.yCursor);
 			if (mid_btn.cnt >= 1) {
 				struct appElement_t* element = calculator.appElements + calculator.yCursor * 10 + calculator.xCursor;
 				// calculator.xCursor = 0;
@@ -376,28 +416,28 @@ void exitApp() {
 	menuPrinter(currentPage, currentId);
 }
 
-void cursorMover() {
+uint8_t cursorMover() {
 	if (up_btn.cnt >= 1) {
 		calculator.yCursor -= up_btn.cnt;
 		up_btn.cnt = 0;
-		appPrinter(&calculator, calculator.xCursor, calculator.yCursor);
+		return 1;
 	}
 	if (down_btn.cnt >= 1) {
 		calculator.yCursor += down_btn.cnt;
 		down_btn.cnt = 0;
-		appPrinter(&calculator, calculator.xCursor, calculator.yCursor);
+		return 1;
 	}
 	if (left_btn.cnt >= 1) {
-		calculator.xCursor -= up_btn.cnt;
+		calculator.xCursor -= left_btn.cnt;
 		left_btn.cnt = 0;
-		appPrinter(&calculator, calculator.xCursor, calculator.yCursor);
+		return 1;
 	}
 	if (right_btn.cnt >= 1) {
-		calculator.xCursor += down_btn.cnt;
+		calculator.xCursor += right_btn.cnt;
 		right_btn.cnt = 0;
-		appPrinter(&calculator, calculator.xCursor, calculator.yCursor);
+		return 1;
 	}
-
+	return 0;
 }
 
 
