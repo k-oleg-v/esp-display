@@ -54,7 +54,7 @@ void app_main(void)
 	// ssd1306_display_text(&dev, 0, lineChar, 20, 0);
 
 	while (1) {
-		process_button_events();
+		// process_button_events();
 		vTaskDelay(pdMS_TO_TICKS(100));
 	}
 }

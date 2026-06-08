@@ -274,12 +274,23 @@ void menuTask() {
 }
 
 
+
 void digitEnter(void* vsymbol, void* vnumber) {
-	char* symbol = (char*) vsymbol;
-	char* number = (char*) vnumber;
-	char outNum[20];
-	sprintf(outNum, "%s%s", number, symbol);
-	number = outNum;
+    if (!vsymbol || !vnumber) return;
+
+    const char* symbol = (const char*) vsymbol;
+    char* number = (char*) vnumber;
+    size_t current_len = strlen(number);
+    size_t symbol_len = strlen(symbol);
+
+    if (current_len + symbol_len > 19) {
+        ESP_LOGW(tag, "Экран заполнен (20/20). Ввод проигнорирован.");
+        return; 
+    }
+
+    strncat(number, symbol, symbol_len);
+
+    ESP_LOGI(tag, "strlen: %zu, текст: %s", strlen(number), number);
 }
 
 void appCtxInit() {
@@ -308,7 +319,11 @@ void appCtxInit() {
 		}
 	}
 
-	calcElements[0][0] = (struct appElement_t) { "", digitEnter, 0, 0};
+
+
+	calcElements[0][0] = (struct appElement_t) { (char*)malloc(19 * sizeof(char)), digitEnter, 0, 0};
+	memset(calcElements[0][0].name, 0, 19);
+
 	calcElements[1][3] = (struct appElement_t) {"0", digitEnter, 3, 1};
 	calcElements[2][3] = (struct appElement_t) {".", digitEnter, 3, 2};
 	calcElements[3][3] = (struct appElement_t) {"=", digitEnter, 3, 3};
@@ -330,25 +345,20 @@ void appPrinter(appCtx_t* curAppCtx, uint8_t curX, uint8_t curY) {
 
     char rowBuf[21]; 
     
-    // j - строки экрана (0..3)
+
     for (size_t j = 0; j < 4; j++) {
         
-        // Полностью очищаем буфер пробелами
+
         memset(rowBuf, ' ', 20);
         rowBuf[20] = '\0';
         
         if (j != curY) {
             
-            // ИСПРАВЛЕНО: перебираем строго 10 элементов, которые принадлежат этой строке
             for (size_t i = 0; i < 10; i++) {
                 struct appElement_t* element = curAppCtx->appElements + j * 10 + i;
                 
                 if (element == NULL || element->name == NULL) continue;
-                
-                // РАСПРЕДЕЛЕНИЕ ПО КООРДИНАТЕ X:
-                // Здесь задается, где на экране (в каком символе по счету) напечатается элемент.
-                // Например, i * 5 разнесет 4 элемента на позиции: 0, 5, 10, 15.
-                // Если нужно, чтобы они стояли плотнее, измените шаг (например, i * 2 или i * 3)
+
                 size_t charX = element->xPos; 
                 
                 if (charX >= 20) break; // Защита границ экрана
@@ -376,7 +386,6 @@ void appPrinter(appCtx_t* curAppCtx, uint8_t curX, uint8_t curY) {
                 
                 if (charX >= 20) break;
 				ssd1306_display_text_box1(&dev, j, 8*charX, element->name, nameLen, nameLen, (i==curX), 0);
-				ESP_LOGI(tag, "Text[%d][%d]: [%s]; Name lenght [%d]",i,j, element->name, nameLen);
 			}
 		}
     }
@@ -397,8 +406,6 @@ void calcTask() {
 			if (cursorMover()) appPrinter(&calculator, calculator.xCursor, calculator.yCursor);
 			if (mid_btn.cnt >= 1) {
 				struct appElement_t* element = calculator.appElements + calculator.yCursor * 10 + calculator.xCursor;
-				// calculator.xCursor = 0;
-				// calculator.yCursor = 0;
 				if (element->action != NULL) {
 					element->action(element->name, calculator.appElements->name);
 				}
@@ -413,6 +420,7 @@ void calcTask() {
 
 void exitApp() {
 	appId = MENU_ID;
+	currentId = 0;
 	menuPrinter(currentPage, currentId);
 }
 
