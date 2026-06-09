@@ -20,6 +20,18 @@
 #include "ssd1306.h"
 #include "font8x8_basic.h"
 
+#include "web_server.h"
+
+
+#include "esp_log.h"
+#include "freertos/idf_additions.h"
+#include "iot_button.h"
+#include "portmacro.h"
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+#include <math.h>
+
 #define CONFIG_SDA_GPIO 20
 #define CONFIG_SCL_GPIO 21
 
@@ -38,6 +50,8 @@
 enum APP_ID {
 	MENU_ID,
 	CALC_ID,
+	READ_ID,
+	WRIT_ID,
 };
 
 struct button_t {
@@ -72,27 +86,21 @@ typedef struct appCtx_t {
 	int16_t* appParameters;
 } appCtx_t;
 
-void menuPrinter(struct menuElement_t *el, uint8_t curId);
-static void button_event_cb(void *arg, void *data);
-void clearScr(void* dev);
-// void openSettings(void* ptr);
+
 void gpio_init();
 void midClk();
 void downClk();
 void upClk();
 void leftClk();
 void rightClk();
-void test_cb(void* arg, void* strct);
+void menuPrinter(struct menuElement_t *el, uint8_t curId);
 void menuTask();
-void digitEnter(void* symbol, void* number);
 void appCtxInit();
+void exitApp();
 void process_button_events();
 void cb_reg();
-void appPrinter(appCtx_t* curAppCtx, uint8_t curX, uint8_t curY);
-void calcTaskCreate();
-void calcTask();
-void exitApp();
-uint8_t cursorMover();
+void calcPrinter(appCtx_t* curAppCtx, uint8_t curX, uint8_t curY);
+uint8_t cursorMover(appCtx_t* ctx);
 
 
 

@@ -1,11 +1,10 @@
 #include "my_fns.h"
-#include "esp_log.h"
-#include "freertos/idf_additions.h"
-#include "iot_button.h"
-#include "portmacro.h"
-#include "ssd1306.h"
+#include "calc.h"
+#include "text_reader.h"
+#include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
+#include "text_writer.h"
 
 struct menuElement_t screenSettingsPage[] = {
 	{"Screen settings", "", 1, NULL},
@@ -13,26 +12,25 @@ struct menuElement_t screenSettingsPage[] = {
 };
 
 struct menuElement_t mainPage[] = {
-	{"    Main menu","", 4, NULL},
-	{"Turn off screen", "", 1, clearScr},
-	{"Hidden text", "topsecret", 2, NULL},
-	{"Calculator", "", 3, calcTaskCreate},
-	{"Screen settings", "", 4, NULL, screenSettingsPage}
+	{"   Main menu","", 4, NULL},
+	// {"Turn off screen", "", 1, NULL},
+	{"Reader", "", 1, textReaderTaskCreate, NULL},
+	{"Calculator", "", 2, calcTaskCreate, NULL},
+	{"Writer", "", 3, writerTaskCreate, NULL}
 };
 
-struct appElement_t calcElements[5][10];
 uint8_t currentId = 0;
 struct menuElement_t* currentPage = mainPage;
 extern SSD1306_t dev;
 size_t curpageSize;
 bool theme = 0;
 
-appCtx_t* appPtr;
-appCtx_t menu;
-appCtx_t calculator; 
-uint8_t appId;
 
-TaskHandle_t xCalcHdl = NULL;
+appCtx_t* appPtr;
+uint8_t appId;
+appCtx_t menu;
+
+
 
 struct button_t mid_btn = {
 	.cfg = {0},
@@ -80,6 +78,7 @@ struct button_t right_btn = {
 	.cnt = 0
 };
 
+// инициализация кнопок
 void gpio_init() {
 	esp_err_t ret = iot_button_new_gpio_device(&mid_btn.cfg, &mid_btn.gpio_cfg, &mid_btn.gpio_hdl);
 	if(NULL == mid_btn.gpio_hdl || ret != ESP_OK) {
@@ -196,25 +195,8 @@ void process_button_events() {
 		
 }
 
-void menuPrinter(struct menuElement_t *page, uint8_t curId) {
-	// size_t menuSize = ARRAY_SIZE(page);
-	uint8_t curshowId = curId % 4;
-	ssd1306_clear_screen(&dev, 0);
-	for (int i = curId - curshowId; i < curId - curshowId + 4; i++){
-		if (!strcmp(page[i].name, "") || (i <= currentPage->id)) {
-			ssd1306_display_text(&dev, i%4, page[i].name, 20, (i == curId));
-		} else {
-			break;
-		}
-	}
-}
 
-void clearScr(void *dev) {
-	SSD1306_t* device = (SSD1306_t*)dev;
-	ssd1306_clear_screen(device, 0);
-	ssd1306_display_text(device, 0, "screen cleared", 20, 0);
-}
-
+//функции кнопок
 void midClk() {
 	mid_btn.cnt++;
 }
@@ -232,7 +214,269 @@ void rightClk() {
 }
 
 
+// для приложений
 
+void appCtxInit() {
+	appId = MENU_ID;
+
+	menu.ctxPtr = &menu;
+	menu.menuElements = mainPage;
+	sprintf(menu.name, "Main menu");
+	menu.appParameters = malloc(sizeof(int16_t)*20);
+
+	calcCtxInit();
+    readerCtxInit();
+	writerCtxInit();
+
+	writerPrinter();
+}
+
+uint8_t cursorMover(appCtx_t* ctx) {
+    uint8_t rows = ctx->appParameters[0]; // Высота сетки (4)
+    uint8_t cols = ctx->appParameters[1]; // Ширина сетки (10)
+    
+    // 1. Фиксируем параметры исходного элемента (ДО перемещения)
+    struct appElement_t* element = ctx->appElements + ctx->yCursor * cols + ctx->xCursor;
+    uint8_t fxPos = element->xPos;
+    uint8_t flen = (element->name != NULL) ? strlen(element->name) : 0;
+	uint8_t fyPos = element->yPos;
+    
+    bool ret = false;
+    bool verticalMovement = false;
+
+    // --- БЛОК ДВИЖЕНИЯ ВВЕРХ ---
+    if (up_btn.cnt >= 1) {
+        uint8_t steps = up_btn.cnt;
+        up_btn.cnt = 0;
+        verticalMovement = true;
+        
+        for (uint8_t i = 0; i < steps; i++) {
+            uint8_t startY = ctx->yCursor;
+            bool rowFound = false;
+            
+            do {
+                if (ctx->yCursor == 0) ctx->yCursor = rows - 1;
+                else ctx->yCursor--;
+                
+                if (ctx->yCursor == startY) break; // Защита от бесконечного цикла
+                
+                // Ищем любую непустую ячейку на этой строке
+                for (uint8_t x = 0; x < cols; x++) {
+                    if ((ctx->appElements + ctx->yCursor * cols + x)->name != NULL) {
+                        rowFound = true;
+                        ctx->xCursor = x; // Временно встаем сюда
+                        break;
+                    }
+                }
+            } while (!rowFound);
+        }
+        ret = true;
+    }
+
+    // --- БЛОК ДВИЖЕНИЯ ВНИЗ ---
+    if (down_btn.cnt >= 1) {
+        uint8_t steps = down_btn.cnt;
+        down_btn.cnt = 0;
+        verticalMovement = true;
+        
+        for (uint8_t i = 0; i < steps; i++) {
+            uint8_t startY = ctx->yCursor;
+            bool rowFound = false;
+            
+            do {
+                ctx->yCursor++;
+                if (ctx->yCursor >= rows) ctx->yCursor = 0;
+                
+                if (ctx->yCursor == startY) break;
+                
+                // Ищем любую непустую ячейку на этой строке
+                for (uint8_t x = 0; x < cols; x++) {
+                    if ((ctx->appElements + ctx->yCursor * cols + x)->name != NULL) {
+                        rowFound = true;
+                        ctx->xCursor = x;
+                        break;
+                    }
+                }
+            } while (!rowFound);
+        }
+        ret = true;
+    }
+
+    // --- БЛОК ДВИЖЕНИЯ ВЛЕВО ---
+    if (left_btn.cnt >= 1) {
+        uint8_t steps = left_btn.cnt;
+        left_btn.cnt = 0;
+        
+        for (uint8_t i = 0; i < steps; i++) {
+            uint8_t startX = ctx->xCursor;
+            do {
+                if (ctx->xCursor == 0) ctx->xCursor = cols - 1;
+                else ctx->xCursor--;
+                
+                if (ctx->xCursor == startX) return 1;
+                element = ctx->appElements + ctx->yCursor * cols + ctx->xCursor;
+            } while (element->name == NULL);
+        }
+        ret = true;
+    }
+    
+    // --- БЛОК ДВИЖЕНИЯ ВПРАВО ---
+    if (right_btn.cnt >= 1) {
+        uint8_t steps = right_btn.cnt;
+        right_btn.cnt = 0;
+        
+        for (uint8_t i = 0; i < steps; i++) {
+            uint8_t startX = ctx->xCursor;
+            do {
+                ctx->xCursor++;
+                if (ctx->xCursor >= cols) ctx->xCursor = 0;
+                
+                if (ctx->xCursor == startX) return 1;
+                element = ctx->appElements + ctx->yCursor * cols + ctx->xCursor;
+            } while (element->name == NULL);
+        }
+        ret = true;
+    }
+
+    // --- ИЗМЕНЕННЫЙ БЛОК ИНТУИТИВНОГО ПЕРЕМЕЩЕНИЯ ---
+    if (ret && verticalMovement) { 
+        uint8_t bestX = ctx->xCursor;
+        int minDistance = 9999; // Задаем заведомо большое расстояние
+
+        // 1. Вычисляем визуальную длину старого элемента на экране
+        uint8_t visual_flen = flen;
+        // Корректируем длину для спецсимволов, которые в памяти весят 2 байта, а на экране занимают 1 символ
+        if (element->name != NULL && strchr(element->name, '\x82') != NULL) visual_flen = 6; // "chars" + стрелочка = 6 символов
+        if (element->name != NULL && strchr(element->name, '\x83') != NULL) visual_flen = 1;
+        if (element->name != NULL && strchr(element->name, '\x84') != NULL) visual_flen = 1;
+
+        // Находим геометрический центр старого элемента на экране (умножаем на 2, чтобы избежать дробных чисел)
+        int oldCenter = (fxPos * 2) + visual_flen;
+
+        // 2. Сканируем всю новую строку (yCursor уже изменен кнопками ВВЕРХ/ВНИЗ)
+        for (uint8_t x = 0; x < cols; x++) {
+            struct appElement_t* evalElem = ctx->appElements + ctx->yCursor * cols + x;
+            
+            if (evalElem->name != NULL) {
+                uint8_t sxPos = evalElem->xPos;
+                uint8_t slen = strlen(evalElem->name);
+                
+                // Точно так же определяем визуальную длину оцениваемого элемента
+                uint8_t visual_slen = slen;
+                if (strchr(evalElem->name, '\x82') != NULL) visual_slen = 6;
+                if (strchr(evalElem->name, '\x83') != NULL) visual_slen = 1;
+                if (strchr(evalElem->name, '\x84') != NULL) visual_slen = 1;
+
+                // Находим центр оцениваемого элемента на экране
+                int newCenter = (sxPos * 2) + visual_slen;
+
+                // Считаем абсолютное расстояние между центрами кнопок по горизонтали
+                int distance = abs(newCenter - oldCenter);
+
+                // Если этот элемент находится ближе к старому центру, чем предыдущие найденные
+                if (distance < minDistance) {
+                    minDistance = distance;
+                    bestX = x; // Запоминаем индекс элемента в массиве ОЗУ
+                }
+            }
+        }
+
+        // Применяем самый близкий по геометрии индекс столбца
+        ctx->xCursor = bestX;
+    }
+    
+    return ret;
+}
+uint8_t cursorMover1(appCtx_t *ctx) {
+	bool yMove = 0;
+	uint8_t ret = 0;
+	uint8_t rows = ctx->appParameters[0];
+    uint8_t cols = ctx->appParameters[1];
+	struct appElement_t* element = (ctx->appElements + ctx->yCursor*ctx->appParameters[1] + ctx->xCursor);
+
+	uint8_t fxPos = element->xPos;
+	uint8_t flen = strlen(element->name);
+
+	if (up_btn.cnt >= 1) {
+		ctx->yCursor-= up_btn.cnt;
+		up_btn.cnt = 0;
+		if (ctx->yCursor > rows) {
+			ctx->yCursor = rows;
+			element = (ctx->appElements + ctx->yCursor*cols + ctx->xCursor);
+			while (element->name == NULL || element == NULL) {
+				ctx->yCursor--;
+			}
+		}
+
+		element = (ctx->appElements + ctx->yCursor*ctx->appParameters[1] + ctx->xCursor);
+		while (element->name == NULL || element == NULL) {
+		ctx->xCursor--;
+		element = (ctx->appElements + ctx->yCursor*ctx->appParameters[1] + ctx->xCursor);
+		}
+		ret = 1;
+		yMove = 1;
+	} else if (down_btn.cnt >= 1) {
+		ctx->yCursor-= down_btn.cnt;
+		down_btn.cnt = 0;
+		if (ctx->yCursor > ctx->appParameters[0]) {
+			ctx->yCursor = 0;
+		}
+
+		element = (ctx->appElements + ctx->yCursor*ctx->appParameters[1] + ctx->xCursor);
+		while (element->name == NULL || element == NULL) {
+		ctx->xCursor--;
+		element = (ctx->appElements + ctx->yCursor*ctx->appParameters[1] + ctx->xCursor);
+		}
+		ret = 1;
+		yMove = 1;
+	}
+	if (left_btn.cnt >= 1) {
+		ctx->xCursor-= left_btn.cnt;
+		left_btn.cnt = 0;
+		ret = 1;
+		if (ctx->xCursor > ctx->appParameters[1]) {
+			ctx->xCursor = ctx->appParameters[1];
+
+			element = (ctx->appElements + ctx->yCursor*ctx->appParameters[1] + ctx->xCursor);
+			while (element->name == NULL || element == NULL) {
+				ctx->xCursor--;
+				element = (ctx->appElements + ctx->yCursor*ctx->appParameters[1] + ctx->xCursor);
+			}
+		}
+	} else if (right_btn.cnt >= 1) {
+		ctx->xCursor+= left_btn.cnt;
+		right_btn.cnt = 0;
+		ret = 1;
+		if (ctx->xCursor > ctx->appParameters[1]) {
+			ctx->xCursor = 0;
+		}
+	}
+
+	if (yMove && ret) {
+
+		yMove = 0;
+		element = (ctx->appElements + ctx->yCursor*ctx->appParameters[1] + ctx->xCursor);
+
+		uint8_t dist = 255;
+		uint8_t sxPos = element->xPos;
+		uint8_t slen = strlen(element->name);
+		
+		uint8_t fxCenter = fxPos*2 + flen;
+		uint8_t sxCenter = sxPos*2 + flen;
+
+	}
+
+	return ret;
+}
+
+
+void exitApp() {
+	appId = MENU_ID;
+	currentId = 0;
+	menuPrinter(currentPage, currentId);
+}
+
+//меню
 void menuTask() {
 	menuPrinter(currentPage, currentId);
 	while (1) {
@@ -273,179 +517,19 @@ void menuTask() {
 	vTaskDelete(NULL);
 }
 
-
-
-void digitEnter(void* vsymbol, void* vnumber) {
-    if (!vsymbol || !vnumber) return;
-
-    const char* symbol = (const char*) vsymbol;
-    char* number = (char*) vnumber;
-    size_t current_len = strlen(number);
-    size_t symbol_len = strlen(symbol);
-
-    if (current_len + symbol_len > 19) {
-        ESP_LOGW(tag, "Экран заполнен (20/20). Ввод проигнорирован.");
-        return; 
-    }
-
-    strncat(number, symbol, symbol_len);
-
-    ESP_LOGI(tag, "strlen: %zu, текст: %s", strlen(number), number);
-}
-
-void appCtxInit() {
-	appId = MENU_ID;
-
-	menu.ctxPtr = &menu;
-	menu.menuElements = mainPage;
-	sprintf(menu.name, "Main menu");
-	menu.appParameters = malloc(sizeof(int16_t)*20);
-
-
-	// memset(&calcElements[0][0], 0, 50*sizeof(struct appElement_t));
-
-	for (int i = 0; i < 3; i++) {
-		for (int j = 1; j < 4; j++) {
-			char* uniqueStr = (char*)malloc(2 * sizeof(char));
-			if (uniqueStr != NULL) {
-				uniqueStr[0] = 0x30 + i + 3 * (j - 1) + 1;
-				uniqueStr[1] = '\0'; // Гарантируем корректное завершение строки
-			} else {
-				ESP_LOGE("INIT", "Не удалось выделить память для цифры!");
-				continue;
-			}
-			calcElements[j][i] = (struct appElement_t) {uniqueStr, digitEnter, i, j};
-			ESP_LOGI(tag, "Name(%d,%d): [%s]", j, i, calcElements[j][i].name);
+void menuPrinter(struct menuElement_t *page, uint8_t curId) {
+	// size_t menuSize = ARRAY_SIZE(page);
+	uint8_t curshowId = curId % 4;
+	ssd1306_clear_screen(&dev, 0);
+	for (int i = curId - curshowId; i < curId - curshowId + 4; i++){
+		if (!strcmp(page[i].name, "") || (i <= currentPage->id)) {
+			ssd1306_display_text(&dev, i%4, page[i].name, 20, (i == curId));
+		} else {
+			break;
 		}
 	}
-
-
-
-	calcElements[0][0] = (struct appElement_t) { (char*)malloc(19 * sizeof(char)), digitEnter, 0, 0};
-	memset(calcElements[0][0].name, 0, 19);
-
-	calcElements[1][3] = (struct appElement_t) {"0", digitEnter, 3, 1};
-	calcElements[2][3] = (struct appElement_t) {".", digitEnter, 3, 2};
-	calcElements[3][3] = (struct appElement_t) {"=", digitEnter, 3, 3};
-	calcElements[1][4] = (struct appElement_t) {"+", digitEnter, 4, 1};
-	calcElements[2][4] = (struct appElement_t) {"x", digitEnter, 4, 2};
-	calcElements[3][4] = (struct appElement_t) {"^", digitEnter, 4, 3};
-	calcElements[1][5] = (struct appElement_t) {"-", digitEnter, 5, 1};
-	calcElements[2][5] = (struct appElement_t) {"\x81", digitEnter, 5, 2};
-	calcElements[3][5] = (struct appElement_t) {"\x80", digitEnter, 5, 3};
-	calcElements[0][1] = (struct appElement_t) {"x", exitApp, 18, 0};
-	// ssd1306_display_text(&dev, 0, calcElements[5][2].name, 2, 0);
-	calculator.ctxPtr = &calculator;
-	calculator.appElements = &calcElements[0][0];
-	appPrinter(calculator.ctxPtr, 2, 2);
 }
 
-void appPrinter(appCtx_t* curAppCtx, uint8_t curX, uint8_t curY) {
-    if (curAppCtx == NULL || curAppCtx->appElements == NULL) return;
 
-    char rowBuf[21]; 
-    
-
-    for (size_t j = 0; j < 4; j++) {
-        
-
-        memset(rowBuf, ' ', 20);
-        rowBuf[20] = '\0';
-        
-        if (j != curY) {
-            
-            for (size_t i = 0; i < 10; i++) {
-                struct appElement_t* element = curAppCtx->appElements + j * 10 + i;
-                
-                if (element == NULL || element->name == NULL) continue;
-
-                size_t charX = element->xPos; 
-                
-                if (charX >= 20) break; // Защита границ экрана
-                
-                size_t nameLen = strlen(element->name);
-                if (charX + nameLen > 20) nameLen = 20 - charX; 
-                
-                // Копируем имя элемента ровно в его координату X
-                memcpy(rowBuf + charX, element->name, nameLen);
-            }
-            
-            // Лог покажет, что лишние девятки пропали
-            ESP_LOGI("PRINTER", "Row %d: [%s]", j, rowBuf);
-            
-            // Вывод ровной строки на дисплей
-            ssd1306_display_text(&dev, j, rowBuf, 20, 0);
-        } else {
-			for (int i = 0; i < 10; i++) {
-				struct appElement_t* element = curAppCtx->appElements + j * 10 + i;
-				if (element == NULL || element->name == NULL) continue;
-				char txt[5];
-				size_t charX = element->xPos;
-				size_t nameLen = strlen(element->name);
-				if (nameLen == 0) continue;
-                
-                if (charX >= 20) break;
-				ssd1306_display_text_box1(&dev, j, 8*charX, element->name, nameLen, nameLen, (i==curX), 0);
-			}
-		}
-    }
-}
-
-void calcTaskCreate() {
-	if (xCalcHdl == NULL) {
-		xTaskCreate(calcTask, "calcTask", 2048, NULL, 5, &xCalcHdl);
-	}
-	appId = CALC_ID;
-}
-
-void calcTask() {
-	calculator.yCursor = 0;
-	appPrinter(&calculator, calculator.xCursor, calculator.yCursor);
-	while (1) {
-		if (appId == CALC_ID) {
-			if (cursorMover()) appPrinter(&calculator, calculator.xCursor, calculator.yCursor);
-			if (mid_btn.cnt >= 1) {
-				struct appElement_t* element = calculator.appElements + calculator.yCursor * 10 + calculator.xCursor;
-				if (element->action != NULL) {
-					element->action(element->name, calculator.appElements->name);
-				}
-				mid_btn.cnt = 0;
-				appPrinter(&calculator, calculator.xCursor, calculator.yCursor);
-			}
-			vTaskDelay(pdMS_TO_TICKS(10));
-		} else vTaskDelay(pdMS_TO_TICKS(100));
-	}
-	vTaskDelete(NULL);
-}
-
-void exitApp() {
-	appId = MENU_ID;
-	currentId = 0;
-	menuPrinter(currentPage, currentId);
-}
-
-uint8_t cursorMover() {
-	if (up_btn.cnt >= 1) {
-		calculator.yCursor -= up_btn.cnt;
-		up_btn.cnt = 0;
-		return 1;
-	}
-	if (down_btn.cnt >= 1) {
-		calculator.yCursor += down_btn.cnt;
-		down_btn.cnt = 0;
-		return 1;
-	}
-	if (left_btn.cnt >= 1) {
-		calculator.xCursor -= left_btn.cnt;
-		left_btn.cnt = 0;
-		return 1;
-	}
-	if (right_btn.cnt >= 1) {
-		calculator.xCursor += right_btn.cnt;
-		right_btn.cnt = 0;
-		return 1;
-	}
-	return 0;
-}
 
 

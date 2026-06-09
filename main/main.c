@@ -17,13 +17,61 @@
 #include "ssd1306.h"
 #include "font8x8_basic.h"
 #include "my_fns.h"
+#include "web_server.h"
+
+#include <stdio.h>
+#include <esp_log.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "freertos/semphr.h"
+
+static const char *TAG = "main_app";
+
+// Локальный буфер, куда приложение будет копировать данные из очереди
+static char app_rx_buffer[MAX_TEXT_LEN + 1];
 
 SSD1306_t dev;
-// appCtx_t calculator; 
+
+extern QueueHandle_t tx_to_phone_queue;
+extern char* inputText;
+extern char* outputText;
+
+extern bool needToSend;
+
+SemaphoreHandle_t display_mutex = NULL;
+
+static void send_to_phone_task(void *pvParameters) {
+    int counter = 0;
+    
+    // ДОБАВЛЕНО static: теперь буфер не нагружает стек задачи FreeRTOS
+    static char tx_buffer[MAX_TEXT_LEN + 1];
+	
+
+    while (1) {
+        vTaskDelay(pdMS_TO_TICKS(5000)); // Проверка каждые 5 секунд
+        
+        if (needToSend) {
+            counter++;
+            snprintf(tx_buffer, sizeof(tx_buffer), "%s", outputText);
+            
+            // Отправляем массив в очередь (ждем до 10 тиков, если веб-сервер занят)
+            if (xQueueSend(tx_to_phone_queue, tx_buffer, pdMS_TO_TICKS(10)) == pdPASS) {
+                ESP_LOGI(TAG, "Данные отправлены на телефон: %s", tx_buffer);
+                
+                // Сбрасываем флаг, чтобы не слать текст повторно в следующем цикле
+                needToSend = 0; 
+            } else {
+                ESP_LOGE(TAG, "Ошибка: не удалось отправить данные в веб-очередь!");
+            }
+        }
+    }
+}
+
 
 void app_main(void)
 {
 	gpio_init();
+	
 	
 
 	int center, top, bottom;
@@ -46,16 +94,21 @@ void app_main(void)
 	ssd1306_contrast(&dev, 0xff);
 	appCtxInit();
 	cb_reg();
+	display_mutex = xSemaphoreCreateMutex();
 	// ssd1306_display_text_box1(&dev, 0, 10, "12", 2, 2, 0, 1);
-	
-	// char pm = 0x80;
-	// char t = 0x7E;
-	// sprintf(lineChar, "%c %c", pm, t);
-	// ssd1306_display_text(&dev, 0, lineChar, 20, 0);
+	init_web_system();
+	xTaskCreate(send_to_phone_task, "send_to_phone", 2048, NULL, 4, NULL);
 
 	while (1) {
 		// process_button_events();
 		vTaskDelay(pdMS_TO_TICKS(100));
+		if (xQueueReceive(web_text_queue, &app_rx_buffer, portMAX_DELAY) == pdPASS) {
+            
+            ESP_LOGW(TAG, "Получен новый текст из main.c!");
+            sprintf(inputText, "%s", app_rx_buffer);
+            
+            printf("--- НАЧАЛО ТЕКСТА ---\n%s\n--- КОНЕЦ ТЕКСТА ---\n", app_rx_buffer);
+		}
 	}
 }
 
