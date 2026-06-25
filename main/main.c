@@ -18,6 +18,7 @@
 #include "font8x8_basic.h"
 #include "my_fns.h"
 #include "web_server.h"
+#include "text_reader.h"
 
 #include <stdio.h>
 #include <esp_log.h>
@@ -94,10 +95,12 @@ void app_main(void)
 	ssd1306_contrast(&dev, 0xff);
 	appCtxInit();
 	cb_reg();
+	vInitMessageQueue();
 	display_mutex = xSemaphoreCreateMutex();
 	// ssd1306_display_text_box1(&dev, 0, 10, "12", 2, 2, 0, 1);
 	init_web_system();
 	xTaskCreate(send_to_phone_task, "send_to_phone", 2048, NULL, 4, NULL);
+	xTaskCreate(vQueueTask, "text queue update", 8192, NULL, 5, NULL);
 
 	while (1) {
 		// process_button_events();
@@ -106,6 +109,9 @@ void app_main(void)
             
             ESP_LOGW(TAG, "Получен новый текст из main.c!");
             sprintf(inputText, "%s", app_rx_buffer);
+			decode_comma(inputText);
+
+			vPostMessageToQueue(inputText);
             
             printf("--- НАЧАЛО ТЕКСТА ---\n%s\n--- КОНЕЦ ТЕКСТА ---\n", app_rx_buffer);
 		}

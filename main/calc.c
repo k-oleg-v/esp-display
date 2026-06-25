@@ -126,6 +126,7 @@ void calcTaskCreate() {
 		xTaskCreate(calcTask, "calcTask", 4096, NULL, 5, &xCalcHdl);
 	}
 	appId = CALC_ID;
+	ssd1306_clear_screen(&dev, 0);
 	calcPrinter(&calculator, calculator.xCursor, calculator.yCursor);
 }
 

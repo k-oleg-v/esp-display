@@ -73,8 +73,9 @@ void writerCtxInit() {
     writerElements[2][12] = (struct appElement_t) {";", textEnter, 15, 2};
     writerElements[3][0]  = (struct appElement_t) {"'", textEnter, 0, 3};
     writerElements[3][1]  = (struct appElement_t) {"\"", textEnter, 1, 3};
-    writerElements[3][2]  = (struct appElement_t) {"[Space] ", textEnter, 2, 3};
-    writerElements[3][3]  = (struct appElement_t) {"chars\x82", NULL, 10, 3};
+    writerElements[3][2]  = (struct appElement_t) {"[Space]", textEnter, 2, 3};
+    writerElements[3][3]  = (struct appElement_t) {"chars\x82", NULL, 9, 3};
+    writerElements[3][3]  = (struct appElement_t) {"x", exitApp, 15, 3};
 
 
     
@@ -140,7 +141,7 @@ void textEnter(void* vsymbol, void* vtext) {
     bool is_special = false;
 
     // 1. Блок системных исключений
-    if (!strcmp(symbol, "[Space] ")) {
+    if (!strcmp(symbol, "[Space] ") || !strcmp(symbol, "[Space]")) {
         sprintf(buf, " ");
         is_special = true;
     } else if (!strcmp(symbol, "tab")) {
@@ -276,7 +277,9 @@ void writerTaskCreate() {
     if (xWriterHdl == NULL) {
         xTaskCreate(writerTask, "writer task", 8192, NULL, 5, &xWriterHdl);
     }
+    writer.xCursor--;
     appId = WRIT_ID;
+    ssd1306_clear_screen(&dev, 0);
     writerPrinter();
 }
 void writerTask() {
@@ -288,7 +291,10 @@ void writerTask() {
 					writerElements[writer.yCursor][writer.xCursor].action(writerElements[writer.yCursor][writer.xCursor].name, outputText);
 				}
 				mid_btn.cnt = 0;
-				writerPrinter();
+                if (appId == WRIT_ID) {
+                writerPrinter();
+                }
+				
 			}
             vTaskDelay(pdMS_TO_TICKS(10));
         } else {

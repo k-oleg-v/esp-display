@@ -35,11 +35,11 @@
 #define CONFIG_SDA_GPIO 20
 #define CONFIG_SCL_GPIO 21
 
-#define BTN_PIN_UP 1
-#define BTN_PIN_CENTER 3
+#define BTN_PIN_UP 3
+#define BTN_PIN_CENTER 10
 #define BTN_PIN_DOWN 0
-#define BTN_PIN_LEFT 10
-#define BTN_PIN_RIGHT 7
+#define BTN_PIN_LEFT 7
+#define BTN_PIN_RIGHT 1
 
 
 #define CONFIG_SSD1306_128x32 1

@@ -1,5 +1,6 @@
 #include "my_fns.h"
 #include "calc.h"
+#include "iot_button.h"
 #include "text_reader.h"
 #include <stdbool.h>
 #include <stdint.h>
@@ -24,6 +25,7 @@ struct menuElement_t* currentPage = mainPage;
 extern SSD1306_t dev;
 size_t curpageSize;
 bool theme = 0;
+
 
 
 appCtx_t* appPtr;
@@ -146,7 +148,7 @@ void gpio_init() {
 
 void cb_reg() {
 	esp_err_t ret;
-	ret = iot_button_register_cb(mid_btn.gpio_hdl, BUTTON_PRESS_UP, NULL, midClk, NULL);
+	ret = iot_button_register_cb(mid_btn.gpio_hdl, BUTTON_SINGLE_CLICK, NULL, midClk, NULL);
 	if(ret != ESP_OK){
 		ESP_LOGE(tag, "midClk failed");
 	}
@@ -199,6 +201,7 @@ void process_button_events() {
 //функции кнопок
 void midClk() {
 	mid_btn.cnt++;
+	
 }
 void downClk() {
 	down_btn.cnt++;
